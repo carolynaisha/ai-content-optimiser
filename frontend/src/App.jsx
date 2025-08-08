@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
+// Simple promise timeout so the UI never hangs forever
 const withTimeout = (ms, promise) =>
   new Promise((resolve, reject) => {
     const id = setTimeout(() => reject(new Error('Request timed out')), ms)
@@ -12,26 +13,43 @@ const withTimeout = (ms, promise) =>
   })
 
 export default function App() {
+  // Inputs
   const [originalText, setOriginalText] = useState('')
   const [audience, setAudience] = useState('general')
-  const [verifyTrends, setVerifyTrends] = useState(true)      // NEW
-  const [mode, setMode] = useState('structured')              // NEW: 'structured' | 'light'
+  const [verifyTrends, setVerifyTrends] = useState(true)       // toggle: backend pytrends on/off
+  const [mode, setMode] = useState('structured')               // 'structured' | 'light'
 
+  // Keyword state
   const [keywords, setKeywords] = useState([])
-  const [trends, setTrends] = useState({})
   const [approvedKeywords, setApprovedKeywords] = useState([])
+  const [trends, setTrends] = useState({})
   const [trendFilter, setTrendFilter] = useState('all')
+
+  // Results
   const [rewritten, setRewritten] = useState('')
   const [narrative, setNarrative] = useState('')
   const [score, setScore] = useState('')
 
+  // UI state
   const [loadingKeywords, setLoadingKeywords] = useState(false)
   const [loadingRewrite, setLoadingRewrite] = useState(false)
   const [error, setError] = useState('')
 
+  // Trend legend
+  const trendLegend = {
+    '⬆️ Trending': 'High & rising interest (avg ≥ 50)',
+    '🟢 Stable': 'Moderate volume (avg ≥ 20)',
+    '🔻 Low interest': 'Low recent volume',
+    '⚠️ No data': 'No reliable trend data',
+    '⏭️ Skipped (manual verify)': 'Server-side Trends disabled'
+  }
+
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
+    setKeywords([])
+    setApprovedKeywords([])
+    setTrends({})
     try {
       const res = await withTimeout(
         15000,
@@ -43,11 +61,12 @@ export default function App() {
       )
       if (!res.ok) throw new Error(`Keywords request failed: ${res.status}`)
       const data = await res.json()
-      setKeywords(data.keywords || [])
-      setApprovedKeywords(data.keywords || [])
+      const kws = data.keywords || []
+      setKeywords(kws)
+      setApprovedKeywords(kws)
       setTrends(data.trends || {})
     } catch (e) {
-      setError(String(e))
+      setError(String(e.message || e))
     } finally {
       setLoadingKeywords(false)
     }
@@ -56,6 +75,9 @@ export default function App() {
   const rewrite = async () => {
     setError('')
     setLoadingRewrite(true)
+    setRewritten('')
+    setNarrative('')
+    setScore('')
     try {
       const res = await withTimeout(
         30000,
@@ -71,19 +93,21 @@ export default function App() {
       setNarrative(data.narrative || '')
       setScore(data.score || '')
     } catch (e) {
-      setError(String(e))
+      setError(String(e.message || e))
     } finally {
       setLoadingRewrite(false)
     }
   }
 
   const downloadHtml = async () => {
+    setError('')
     try {
       const res = await fetch(`${API_BASE}/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ html: rewritten })
       })
+      if (!res.ok) throw new Error(`Download request failed: ${res.status}`)
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
@@ -92,28 +116,31 @@ export default function App() {
       a.click()
       window.URL.revokeObjectURL(url)
     } catch (e) {
-      setError(String(e))
+      setError(String(e.message || e))
     }
   }
 
-  const trendLegend = {
-    '⬆️ Trending': 'High & rising interest (avg ≥ 50)',
-    '🟢 Stable': 'Moderate volume (avg ≥ 20)',
-    '🔻 Low interest': 'Low recent volume',
-    '⚠️ No data': 'No reliable trend data'
+  // Build a safe Google Trends URL (max 5 queries, URL-encoded, region/timeframe optional)
+  const openTrends = () => {
+    const top5 = approvedKeywords.slice(0, 5)
+    if (top5.length === 0) return
+    const q = top5.map(k => encodeURIComponent(k)).join(',')
+    // Adjust geo/hl/date for your audience as needed
+    const url = `https://trends.google.com/trends/explore?date=now%207-d&geo=GB&hl=en-GB&q=${q}`
+    window.open(url, '_blank', 'noopener')
   }
 
+  // Filters
   const matchesFilter = (kw) => {
     if (trendFilter === 'all') return true
     return (trends[kw] || '') === trendFilter
   }
-
   const filteredKeywords = keywords.filter(matchesFilter)
 
   return (
     <div style={{ maxWidth: 1000, margin: '40px auto', padding: 16, fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif' }}>
       <h1 style={{ marginBottom: 4 }}>AI Content Optimizer</h1>
-      <div style={{ color: '#666' }}>Keyword gen → Trends → Rewrite → Score → Narrative → Download HTML</div>
+      <div style={{ color: '#666' }}>Keyword gen → Trends (optional) → Rewrite → Score → Narrative → Download HTML</div>
 
       <section style={{ marginTop: 24 }}>
         <h2>Step 1 — Paste Original Content</h2>
@@ -147,7 +174,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* NEW: toggles for Trends + Mode */}
+        {/* Toggles */}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
@@ -155,7 +182,7 @@ export default function App() {
               checked={verifyTrends}
               onChange={(e) => setVerifyTrends(e.target.checked)}
             />
-            Verify Trends (slower)
+            Verify Trends (server-side; slower)
           </label>
 
           <label>
@@ -172,6 +199,7 @@ export default function App() {
         <section style={{ marginTop: 24 }}>
           <h2>Step 2 — Approve or Edit Keywords</h2>
 
+          {/* Filter by trend label */}
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 8 }}>
             <label>Filter by trend:</label>
             <select
@@ -184,9 +212,11 @@ export default function App() {
               <option value="🟢 Stable">🟢 Stable</option>
               <option value="🔻 Low interest">🔻 Low interest</option>
               <option value="⚠️ No data">⚠️ No data</option>
+              <option value="⏭️ Skipped (manual verify)">⏭️ Skipped (manual verify)</option>
             </select>
           </div>
 
+          {/* Keyword list */}
           <ul style={{ margin: 0, paddingLeft: 18 }}>
             {filteredKeywords.map((kw, i) => (
               <li key={i} style={{ margin: '4px 0' }}>
@@ -195,6 +225,7 @@ export default function App() {
             ))}
           </ul>
 
+          {/* Legend */}
           <div style={{ marginTop: 12, color: '#666' }}>
             <strong>Trend Legend:</strong>{' '}
             {Object.entries(trendLegend).map(([k, v]) => (
@@ -202,6 +233,7 @@ export default function App() {
             ))}
           </div>
 
+          {/* Editable approved list */}
           <div style={{ marginTop: 12 }}>
             <label style={{ display: 'block', marginBottom: 6 }}>Approved keywords (comma-separated):</label>
             <textarea
@@ -216,6 +248,7 @@ export default function App() {
             />
           </div>
 
+          {/* Actions */}
           <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <button
               onClick={rewrite}
@@ -226,7 +259,7 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => window.open(`https://trends.google.com/trends/explore?q=${approvedKeywords.join(',')}`, '_blank')}
+              onClick={openTrends}
               style={{ padding: '8px 12px', borderRadius: 6, border: '1px solid #ddd', background: '#fafafa' }}
             >
               Verify in Google Trends
@@ -272,4 +305,5 @@ export default function App() {
     </div>
   )
 }
+
 
