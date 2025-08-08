@@ -91,6 +91,8 @@ export default function App() {
   }
 
   const filteredKeywords = keywords.filter(matchesFilter)
+  const [verifyTrends, setVerifyTrends] = useState(true);
+  const [mode, setMode] = useState('structured'); // 'structured' | 'light'
 
   return (
     <div style={{ maxWidth: 1000, margin: '40px auto', padding: 16, fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif' }}>
