@@ -145,6 +145,24 @@ const rewrite = async () => {
           </button>
         </div>
       </section>
+    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <input
+        type="checkbox"
+        checked={verifyTrends}
+        onChange={(e) => setVerifyTrends(e.target.checked)}
+        />
+        Verify Trends (slower)
+        </label>
+
+        <label>
+        Rewrite mode:{' '}
+        <select value={mode} onChange={(e) => setMode(e.target.value)}>
+        <option value="structured">Structured (ChatGPT‑style)</option>
+        <option value="light">Light</option>
+        </select>
+      </label>
+    </div>
 
       {keywords.length > 0 && (
         <section style={{ marginTop: 24 }}>
