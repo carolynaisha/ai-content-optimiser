@@ -4,15 +4,19 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const withTimeout = (ms, promise) =>
   new Promise((resolve, reject) => {
-    const id = setTimeout(() => reject(new Error('Request timed out')), ms);
+    const id = setTimeout(() => reject(new Error('Request timed out')), ms)
     promise.then(
-      (res) => { clearTimeout(id); resolve(res); },
-      (err) => { clearTimeout(id); reject(err); }
-    );
+      (res) => { clearTimeout(id); resolve(res) },
+      (err) => { clearTimeout(id); reject(err) }
+    )
   })
+
 export default function App() {
   const [originalText, setOriginalText] = useState('')
   const [audience, setAudience] = useState('general')
+  const [verifyTrends, setVerifyTrends] = useState(true)      // NEW
+  const [mode, setMode] = useState('structured')              // NEW: 'structured' | 'light'
+
   const [keywords, setKeywords] = useState([])
   const [trends, setTrends] = useState({})
   const [approvedKeywords, setApprovedKeywords] = useState([])
@@ -26,52 +30,52 @@ export default function App() {
   const [error, setError] = useState('')
 
   const genKeywords = async () => {
-  setError('');
-  setLoadingKeywords(true);
-  try {
-    const res = await withTimeout(
-      15000,
-      fetch(`${API_BASE}/keywords`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, audience, verifyTrends })
-      })
-    );
-    if (!res.ok) throw new Error(`Keywords request failed: ${res.status}`);
-    const data = await res.json();
-    setKeywords(data.keywords || []);
-    setApprovedKeywords(data.keywords || []);
-    setTrends(data.trends || {});
-  } catch (e) {
-    setError(String(e));
-  } finally {
-    setLoadingKeywords(false);
+    setError('')
+    setLoadingKeywords(true)
+    try {
+      const res = await withTimeout(
+        15000,
+        fetch(`${API_BASE}/keywords`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: originalText, audience, verifyTrends })
+        })
+      )
+      if (!res.ok) throw new Error(`Keywords request failed: ${res.status}`)
+      const data = await res.json()
+      setKeywords(data.keywords || [])
+      setApprovedKeywords(data.keywords || [])
+      setTrends(data.trends || {})
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoadingKeywords(false)
+    }
   }
-}
 
-const rewrite = async () => {
-  setError('');
-  setLoadingRewrite(true);
-  try {
-    const res = await withTimeout(
-      30000,
-      fetch(`${API_BASE}/rewrite`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, keywords: approvedKeywords, mode })
-      })
-    );
-    if (!res.ok) throw new Error(`Rewrite request failed: ${res.status}`);
-    const data = await res.json();
-    setRewritten(data.rewritten || '');
-    setNarrative(data.narrative || '');
-    setScore(data.score || '');
-  } catch (e) {
-    setError(String(e));
-  } finally {
-    setLoadingRewrite(false);
+  const rewrite = async () => {
+    setError('')
+    setLoadingRewrite(true)
+    try {
+      const res = await withTimeout(
+        30000,
+        fetch(`${API_BASE}/rewrite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: originalText, keywords: approvedKeywords, mode })
+        })
+      )
+      if (!res.ok) throw new Error(`Rewrite request failed: ${res.status}`)
+      const data = await res.json()
+      setRewritten(data.rewritten || '')
+      setNarrative(data.narrative || '')
+      setScore(data.score || '')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setLoadingRewrite(false)
+    }
   }
-}
 
   const downloadHtml = async () => {
     try {
@@ -105,8 +109,6 @@ const rewrite = async () => {
   }
 
   const filteredKeywords = keywords.filter(matchesFilter)
-  const [verifyTrends, setVerifyTrends] = useState(true);
-  const [mode, setMode] = useState('structured'); // 'structured' | 'light'
 
   return (
     <div style={{ maxWidth: 1000, margin: '40px auto', padding: 16, fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif' }}>
@@ -144,25 +146,27 @@ const rewrite = async () => {
             {loadingKeywords ? 'Generating…' : 'Generate Keywords'}
           </button>
         </div>
-      </section>
-    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <input
-        type="checkbox"
-        checked={verifyTrends}
-        onChange={(e) => setVerifyTrends(e.target.checked)}
-        />
-        Verify Trends (slower)
-        </label>
 
-        <label>
-        Rewrite mode:{' '}
-        <select value={mode} onChange={(e) => setMode(e.target.value)}>
-        <option value="structured">Structured (ChatGPT‑style)</option>
-        <option value="light">Light</option>
-        </select>
-      </label>
-    </div>
+        {/* NEW: toggles for Trends + Mode */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={verifyTrends}
+              onChange={(e) => setVerifyTrends(e.target.checked)}
+            />
+            Verify Trends (slower)
+          </label>
+
+          <label>
+            Rewrite mode:{' '}
+            <select value={mode} onChange={(e) => setMode(e.target.value)}>
+              <option value="structured">Structured (ChatGPT‑style)</option>
+              <option value="light">Light</option>
+            </select>
+          </label>
+        </div>
+      </section>
 
       {keywords.length > 0 && (
         <section style={{ marginTop: 24 }}>
@@ -268,3 +272,4 @@ const rewrite = async () => {
     </div>
   )
 }
+
