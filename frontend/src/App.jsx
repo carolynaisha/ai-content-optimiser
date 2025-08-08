@@ -18,25 +18,28 @@ export default function App() {
   const [error, setError] = useState('')
 
   const genKeywords = async () => {
-    setError('')
-    setLoadingKeywords(true)
-    try {
-      const res = await fetch(`${API_BASE}/keywords`, {
+  setError('');
+  setLoadingKeywords(true);
+  try {
+    const res = await withTimeout(
+      15000,
+      fetch(`${API_BASE}/keywords`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, audience })
+        body: JSON.stringify({ content: originalText, audience, verifyTrends })
       })
-      if (!res.ok) throw new Error(`Keywords request failed: ${res.status}`)
-      const data = await res.json()
-      setKeywords(data.keywords || [])
-      setApprovedKeywords(data.keywords || [])
-      setTrends(data.trends || {})
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoadingKeywords(false)
-    }
+    );
+    if (!res.ok) throw new Error(`Keywords request failed: ${res.status}`);
+    const data = await res.json();
+    setKeywords(data.keywords || []);
+    setApprovedKeywords(data.keywords || []);
+    setTrends(data.trends || {});
+  } catch (e) {
+    setError(String(e));
+  } finally {
+    setLoadingKeywords(false);
   }
+}
 
   const rewrite = async () => {
     setError('')
