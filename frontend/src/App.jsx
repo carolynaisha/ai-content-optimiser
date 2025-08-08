@@ -2,6 +2,14 @@ import React, { useState } from 'react'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
+const withTimeout = (ms, promise) =>
+  new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error('Request timed out')), ms);
+    promise.then(
+      (res) => { clearTimeout(id); resolve(res); },
+      (err) => { clearTimeout(id); reject(err); }
+    );
+  })
 export default function App() {
   const [originalText, setOriginalText] = useState('')
   const [audience, setAudience] = useState('general')
