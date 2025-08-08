@@ -41,26 +41,29 @@ export default function App() {
   }
 }
 
-  const rewrite = async () => {
-    setError('')
-    setLoadingRewrite(true)
-    try {
-      const res = await fetch(`${API_BASE}/rewrite`, {
+const rewrite = async () => {
+  setError('');
+  setLoadingRewrite(true);
+  try {
+    const res = await withTimeout(
+      30000,
+      fetch(`${API_BASE}/rewrite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, keywords: approvedKeywords })
+        body: JSON.stringify({ content: originalText, keywords: approvedKeywords, mode })
       })
-      if (!res.ok) throw new Error(`Rewrite request failed: ${res.status}`)
-      const data = await res.json()
-      setRewritten(data.rewritten || '')
-      setNarrative(data.narrative || '')
-      setScore(data.score || '')
-    } catch (e) {
-      setError(String(e))
-    } finally {
-      setLoadingRewrite(false)
-    }
+    );
+    if (!res.ok) throw new Error(`Rewrite request failed: ${res.status}`);
+    const data = await res.json();
+    setRewritten(data.rewritten || '');
+    setNarrative(data.narrative || '');
+    setScore(data.score || '');
+  } catch (e) {
+    setError(String(e));
+  } finally {
+    setLoadingRewrite(false);
   }
+}
 
   const downloadHtml = async () => {
     try {
