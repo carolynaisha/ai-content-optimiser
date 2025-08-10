@@ -162,6 +162,7 @@ export default function App() {
             <option value="donor">Donors (philanthropy, CSR, foundations)</option>
             <option value="journalist">Journalists</option>
             <option value="policy">Policy & Advocacy</option>
+            <option value="campaigner">Campaigner</option> {/* NEW */}
           </select>
 
           <button
