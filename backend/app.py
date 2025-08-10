@@ -45,13 +45,15 @@ def get_trends_summary(keywords):
         # If Google blocks the request or network fails, don’t break the app
         return {k: "⚠️ No data" for k in keywords}
 
-def audience_hint(audience):
-    return {
+def audience_hint(audience: str) -> str:
+    mapping = {
         "general": "based on general reader interest",
         "donor": "tailored to donor audiences such as philanthropists, CSR leads, or foundations",
         "journalist": "optimized for journalists looking for headlines and angles",
         "policy": "framed for advocacy, policy makers, and institutions",
-    }.get(audience or "general", "based on general reader interest")
+        "campaigner": "designed for grassroots activists and campaign organisers; motivational, action-driven, with clear calls-to-action",  # NEW
+    }
+    return mapping.get((audience or "general").lower(), mapping["general"])
 
 @app.post("/keywords")
 def keywords():
