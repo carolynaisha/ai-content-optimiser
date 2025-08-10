@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+
+// Promise timeout to avoid hanging UI
 const withTimeout = (ms, promise) =>
   new Promise((resolve, reject) => {
     const id = setTimeout(() => reject(new Error('Request timed out')), ms)
@@ -31,15 +32,25 @@ export default function App() {
   const [narrative, setNarrative] = useState('')
   const [score, setScore] = useState('')
 
-  // Phase One: SEO essentials
+  // SEO essentials
   const [meta, setMeta] = useState({ title: '', description: '' })
   const [faqs, setFaqs] = useState([])
   const [jsonld, setJsonld] = useState('')
+
+  // Distribution + proposals
+  const [social, setSocial] = useState(null)       // { posts, hashtags, emailTeaser, plan }
+  const [expansion, setExpansion] = useState(null) // { expansionIdeas, supportingDataNeeded, recommendedMedia }
+  const [faqProps, setFaqProps] = useState([])     // ["Q1", "Q2", ...]
 
   // UI
   const [loadingKeywords, setLoadingKeywords] = useState(false)
   const [loadingRewrite, setLoadingRewrite] = useState(false)
   const [error, setError] = useState('')
+
+  // Markdown → sanitized HTML for on-screen display & download
+  const renderedHtml = rewritten
+    ? DOMPurify.sanitize(marked.parse(rewritten))
+    : ''
 
   const trendLegend = {
     '⬆️ Trending': 'High & rising interest (avg ≥ 50)',
@@ -49,6 +60,7 @@ export default function App() {
     '⏭️ Skipped (manual verify)': 'Server-side Trends disabled'
   }
 
+  // -------- API calls --------
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
@@ -100,13 +112,115 @@ export default function App() {
     }
   }
 
+  const genMeta = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(12000, fetch(`${API_BASE}/meta`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ content: originalText, keywords: approvedKeywords, audience })
+      }))
+      if (!res.ok) throw new Error(`Meta request failed: ${res.status}`)
+      const data = await res.json()
+      setMeta({ title: data.title || '', description: data.description || '' })
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  const genFaq = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(15000, fetch(`${API_BASE}/faq`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ content: originalText, keywords: approvedKeywords, audience })
+      }))
+      if (!res.ok) throw new Error(`FAQ request failed: ${res.status}`)
+      const data = await res.json()
+      setFaqs(data.faqs || [])
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  const genSchema = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(15000, fetch(`${API_BASE}/schema`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          content: rewritten || originalText,
+          keywords: approvedKeywords,
+          audience,
+          headline: (rewritten.match(/^#\s*(.*)$/m) || [,''])[1],
+          faqs
+        })
+      }))
+      if (!res.ok) throw new Error(`Schema request failed: ${res.status}`)
+      const data = await res.json()
+      setJsonld(data.jsonld || '')
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  const genDistribute = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(15000, fetch(`${API_BASE}/distribute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: rewritten || originalText, keywords: approvedKeywords, audience })
+      }))
+      if (!res.ok) throw new Error(`Distribute request failed: ${res.status}`)
+      const data = await res.json()
+      setSocial(data)
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  const genExpand = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(15000, fetch(`${API_BASE}/expand`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ content: rewritten || originalText, keywords: approvedKeywords, audience })
+      }))
+      if (!res.ok) throw new Error(`Expand request failed: ${res.status}`)
+      const data = await res.json()
+      setExpansion(data)
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  const genFaqProps = async () => {
+    setError('')
+    try {
+      const res = await withTimeout(12000, fetch(`${API_BASE}/faq_proposals`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify({ content: rewritten || originalText, keywords: approvedKeywords, audience })
+      }))
+      if (!res.ok) throw new Error(`FAQ proposals request failed: ${res.status}`)
+      const data = await res.json()
+      setFaqProps(data.faqProposals || [])
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
   const downloadHtml = async () => {
     setError('')
     try {
       const res = await fetch(`${API_BASE}/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html: rewritten, jsonld })
+        body: JSON.stringify({
+          html: `<article>${renderedHtml}</article>`,
+          jsonld
+        })
       })
       if (!res.ok) throw new Error(`Download request failed: ${res.status}`)
       const blob = await res.blob()
@@ -129,49 +243,9 @@ export default function App() {
     window.open(url, '_blank', 'noopener')
   }
 
-  const matchesFilter = (kw) => {
-    if (trendFilter === 'all') return true
-    return (trends[kw] || '') === trendFilter
-  }
-  const filteredKeywords = keywords.filter(matchesFilter)
+  const matchesFilter = (kw) => trendFilter === 'all' || (trends[kw] || '') === trendFilter
 
-  // Phase One functions
-  const genMeta = async () => {
-    setError('')
-    const res = await withTimeout(12000, fetch(`${API_BASE}/meta`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ content: originalText, keywords: approvedKeywords, audience })
-    }))
-    const data = await res.json()
-    setMeta({ title: data.title || '', description: data.description || '' })
-  }
-
-  const genFaq = async () => {
-    setError('')
-    const res = await withTimeout(15000, fetch(`${API_BASE}/faq`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ content: originalText, keywords: approvedKeywords, audience })
-    }))
-    const data = await res.json()
-    setFaqs(data.faqs || [])
-  }
-
-  const genSchema = async () => {
-    setError('')
-    const res = await withTimeout(15000, fetch(`${API_BASE}/schema`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        content: rewritten || originalText,
-        keywords: approvedKeywords,
-        audience,
-        headline: (rewritten.match(/^#\s*(.*)$/m) || [,''])[1],
-        faqs
-      })
-    }))
-    const data = await res.json()
-    setJsonld(data.jsonld || '')
-  }
-
+  // -------- UI --------
   return (
     <div className="min-h-screen bg-gray-50 py-10">
       <div className="max-w-4xl mx-auto px-4">
@@ -179,7 +253,7 @@ export default function App() {
           <header className="mb-8 text-center">
             <h1 className="text-3xl font-semibold tracking-tight">AI Content Optimizer</h1>
             <p className="text-sm text-gray-600 mt-2">
-              Keywords → Trends (optional) → Rewrite → Meta/FAQ/Schema → Download HTML
+              Keywords → Trends (optional) → Rewrite → Meta/FAQ/Schema → Social/Expansion → Download HTML
             </p>
           </header>
 
@@ -275,7 +349,13 @@ export default function App() {
 
               <div className="mt-3 text-sm text-gray-600">
                 <strong>Trend Legend:</strong>{' '}
-                {Object.entries(trendLegend).map(([k, v]) => (
+                {Object.entries({
+                  '⬆️ Trending': trendLegend['⬆️ Trending'],
+                  '🟢 Stable': trendLegend['🟢 Stable'],
+                  '🔻 Low interest': trendLegend['🔻 Low interest'],
+                  '⚠️ No data': trendLegend['⚠️ No data'],
+                  '⏭️ Skipped (manual verify)': trendLegend['⏭️ Skipped (manual verify)'],
+                }).map(([k, v]) => (
                   <span key={k} className="mr-3"><strong>{k}</strong>: {v}</span>
                 ))}
               </div>
@@ -318,9 +398,10 @@ export default function App() {
               <h2 className="text-xl font-semibold mb-3">Step 3 — Results</h2>
 
               <h3 className="font-semibold mb-2">Rewritten Content</h3>
-              <div className="border border-gray-200 rounded-lg p-4 whitespace-pre-wrap">
-                {rewritten}
-              </div>
+              <div
+                className="prose max-w-none border border-gray-200 rounded-lg p-4"
+                dangerouslySetInnerHTML={{ __html: renderedHtml || '<p>(No content)</p>' }}
+              />
 
               <h3 className="font-semibold mt-6 mb-2">Narrative Summary</h3>
               <div className="text-gray-700 whitespace-pre-wrap">{narrative}</div>
@@ -339,6 +420,15 @@ export default function App() {
                 </button>
                 <button onClick={genSchema} className="px-3 py-2 rounded-md border border-gray-300 bg-gray-50">
                   Generate Schema
+                </button>
+                <button onClick={genDistribute} className="px-3 py-2 rounded-md border border-gray-300 bg-gray-50">
+                  Generate Social Posts
+                </button>
+                <button onClick={genExpand} className="px-3 py-2 rounded-md border border-gray-300 bg-gray-50">
+                  Content Expansion Ideas
+                </button>
+                <button onClick={genFaqProps} className="px-3 py-2 rounded-md border border-gray-300 bg-gray-50">
+                  FAQ Proposals
                 </button>
               </div>
 
@@ -363,6 +453,91 @@ export default function App() {
                 <div className="mt-4">
                   <h3 className="font-semibold mb-1">Schema (JSON‑LD)</h3>
                   <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto">{jsonld}</pre>
+                </div>
+              )}
+
+              {social && (
+                <div className="mt-4">
+                  <h3 className="font-semibold mb-1">Social Posts & Channel Plan</h3>
+                  <div className="grid md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <div className="font-semibold">LinkedIn</div>
+                      <ul className="list-disc pl-5">{social.posts?.linkedin?.map((t,i)=><li key={i} className="mb-1">{t}</li>)}</ul>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Twitter/X</div>
+                      <ul className="list-disc pl-5">{social.posts?.twitter?.map((t,i)=><li key={i} className="mb-1">{t}</li>)}</ul>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Instagram</div>
+                      <ul className="list-disc pl-5">{social.posts?.instagram?.map((t,i)=><li key={i} className="mb-1">{t}</li>)}</ul>
+                    </div>
+                    <div>
+                      <div className="font-semibold">Channel Plan</div>
+                      <ul className="list-disc pl-5">{social.plan?.map((t,i)=><li key={i} className="mb-1">{t}</li>)}</ul>
+                    </div>
+                  </div>
+                  {social.hashtags?.length > 0 && (
+                    <div className="text-sm mt-2"><strong>Hashtags:</strong> {social.hashtags.join(' ')}</div>
+                  )}
+                  {social.emailTeaser && (
+                    <div className="text-sm mt-2"><strong>Email Teaser:</strong> {social.emailTeaser}</div>
+                  )}
+                </div>
+              )}
+
+              {expansion && (
+                <div className="mt-4">
+                  <h3 className="font-semibold mb-1">Content Expansion Proposal</h3>
+                  {expansion.expansionIdeas?.length > 0 ? (
+                    <div className="overflow-auto border rounded-lg">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="text-left p-2">Suggested Section</th>
+                            <th className="text-left p-2">Why / What to add</th>
+                            <th className="text-left p-2">Priority</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {expansion.expansionIdeas.map((it, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="p-2 font-medium">{it.title}</td>
+                              <td className="p-2">{it.description}</td>
+                              <td className="p-2">{it.priority}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <div className="text-sm text-gray-600">No expansion ideas returned.</div>}
+
+                  <div className="mt-3 grid md:grid-cols-2 gap-3 text-sm">
+                    {expansion.supportingDataNeeded?.length > 0 && (
+                      <div>
+                        <div className="font-semibold mb-1">Supporting Data Needed</div>
+                        <ul className="list-disc pl-5">{expansion.supportingDataNeeded.map((t,i)=><li key={i}>{t}</li>)}</ul>
+                      </div>
+                    )}
+                    {expansion.recommendedMedia?.length > 0 && (
+                      <div>
+                        <div className="font-semibold mb-1">Recommended Media</div>
+                        <ul className="list-disc pl-5">{expansion.recommendedMedia.map((t,i)=><li key={i}>{t}</li>)}</ul>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {faqProps?.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="font-semibold mb-1">FAQ Proposals (Questions Only)</h3>
+                  <ul className="list-disc pl-5 text-sm">
+                    {faqProps.map((q,i)=><li key={i}>{q}</li>)}
+                  </ul>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Tip: Select questions you like and use <em>Generate FAQs</em> to create answers from the source content.
+                  </div>
                 </div>
               )}
 
