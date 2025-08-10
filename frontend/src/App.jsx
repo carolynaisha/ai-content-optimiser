@@ -4,7 +4,7 @@ import DOMPurify from 'dompurify'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
-// Promise timeout to avoid hanging UI
+// Promise timeout so UI never hangs
 const withTimeout = (ms, promise) =>
   new Promise((resolve, reject) => {
     const id = setTimeout(() => reject(new Error('Request timed out')), ms)
@@ -40,14 +40,14 @@ export default function App() {
   // Distribution + proposals
   const [social, setSocial] = useState(null)       // { posts, hashtags, emailTeaser, plan }
   const [expansion, setExpansion] = useState(null) // { expansionIdeas, supportingDataNeeded, recommendedMedia }
-  const [faqProps, setFaqProps] = useState([])     // ["Q1", "Q2", ...]
+  const [faqProps, setFaqProps] = useState([])     // ["Q1","Q2",...]
 
   // UI
   const [loadingKeywords, setLoadingKeywords] = useState(false)
   const [loadingRewrite, setLoadingRewrite] = useState(false)
   const [error, setError] = useState('')
 
-  // Markdown → sanitized HTML for on-screen display & download
+  // Render Markdown → sanitized HTML
   const renderedHtml = rewritten
     ? DOMPurify.sanitize(marked.parse(rewritten))
     : ''
@@ -60,7 +60,7 @@ export default function App() {
     '⏭️ Skipped (manual verify)': 'Server-side Trends disabled'
   }
 
-  // -------- API calls --------
+  // ---------- API calls ----------
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
@@ -122,9 +122,7 @@ export default function App() {
       if (!res.ok) throw new Error(`Meta request failed: ${res.status}`)
       const data = await res.json()
       setMeta({ title: data.title || '', description: data.description || '' })
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const genFaq = async () => {
@@ -137,9 +135,7 @@ export default function App() {
       if (!res.ok) throw new Error(`FAQ request failed: ${res.status}`)
       const data = await res.json()
       setFaqs(data.faqs || [])
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const genSchema = async () => {
@@ -158,9 +154,7 @@ export default function App() {
       if (!res.ok) throw new Error(`Schema request failed: ${res.status}`)
       const data = await res.json()
       setJsonld(data.jsonld || '')
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const genDistribute = async () => {
@@ -174,9 +168,7 @@ export default function App() {
       if (!res.ok) throw new Error(`Distribute request failed: ${res.status}`)
       const data = await res.json()
       setSocial(data)
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const genExpand = async () => {
@@ -190,9 +182,7 @@ export default function App() {
       if (!res.ok) throw new Error(`Expand request failed: ${res.status}`)
       const data = await res.json()
       setExpansion(data)
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const genFaqProps = async () => {
@@ -206,9 +196,7 @@ export default function App() {
       if (!res.ok) throw new Error(`FAQ proposals request failed: ${res.status}`)
       const data = await res.json()
       setFaqProps(data.faqProposals || [])
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const downloadHtml = async () => {
@@ -230,9 +218,7 @@ export default function App() {
       a.download = 'rewritten_content.html'
       a.click()
       window.URL.revokeObjectURL(url)
-    } catch (e) {
-      setError(String(e.message || e))
-    }
+    } catch (e) { setError(String(e.message || e)) }
   }
 
   const openTrends = () => {
@@ -245,7 +231,7 @@ export default function App() {
 
   const matchesFilter = (kw) => trendFilter === 'all' || (trends[kw] || '') === trendFilter
 
-  // -------- UI --------
+  // ---------- UI ----------
   return (
     <div className="min-h-screen bg-gray-50 py-10">
       <div className="max-w-4xl mx-auto px-4">
@@ -349,13 +335,7 @@ export default function App() {
 
               <div className="mt-3 text-sm text-gray-600">
                 <strong>Trend Legend:</strong>{' '}
-                {Object.entries({
-                  '⬆️ Trending': trendLegend['⬆️ Trending'],
-                  '🟢 Stable': trendLegend['🟢 Stable'],
-                  '🔻 Low interest': trendLegend['🔻 Low interest'],
-                  '⚠️ No data': trendLegend['⚠️ No data'],
-                  '⏭️ Skipped (manual verify)': trendLegend['⏭️ Skipped (manual verify)'],
-                }).map(([k, v]) => (
+                {Object.entries(trendLegend).map(([k, v]) => (
                   <span key={k} className="mr-3"><strong>{k}</strong>: {v}</span>
                 ))}
               </div>
@@ -399,7 +379,7 @@ export default function App() {
 
               <h3 className="font-semibold mb-2">Rewritten Content</h3>
               <div
-                className="prose max-w-none border border-gray-200 rounded-lg p-4"
+                className="prose prose-lg max-w-none border border-gray-200 rounded-lg p-4"
                 dangerouslySetInnerHTML={{ __html: renderedHtml || '<p>(No content)</p>' }}
               />
 
@@ -410,7 +390,7 @@ export default function App() {
                 AI Search Readiness Score: {String(score).replace('/10','')}/10
               </div>
 
-              {/* Phase One controls */}
+              {/* Controls for Meta/FAQ/Schema + Social/Expansion/FAQ Proposals */}
               <div className="mt-4 flex flex-wrap gap-3">
                 <button onClick={genMeta} className="px-3 py-2 rounded-md border border-gray-300 bg-gray-50">
                   Generate Meta
@@ -564,4 +544,3 @@ export default function App() {
     </div>
   )
 }
-
