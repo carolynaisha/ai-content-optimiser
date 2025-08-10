@@ -5,3 +5,4 @@ pytrends
 python-dotenv
 gunicorn
 
+
