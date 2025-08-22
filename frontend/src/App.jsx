@@ -26,17 +26,42 @@ export default function App() {
   const [error, setError] = useState('')
 
   const renderedPreview = html ? DOMPurify.sanitize(html) : ''
+  <div className="mt-4 flex flex-wrap gap-3 items-center">
+  <label className="text-sm text-gray-700">Audience</label>
+  <select
+    value={audience}
+    onChange={(e) => setAudience(e.target.value)}
+    className="border border-gray-300 rounded-md p-2"
+  >
+    <option value="general">General</option>
+    <option value="donor">Donor</option>
+    <option value="journalist">Journalist</option>
+    <option value="policy">Policy</option>
+  </select>
+
+  <button
+    onClick={genKeywords}
+    disabled={!originalText.trim() || loadingKeywords}
+    className="px-4 py-2 rounded-md border border-gray-900 bg-black text-white disabled:opacity-60"
+  >
+    {loadingKeywords ? 'Generating…' : 'Generate Keywords'}
+  </button>
+</div>
+
 
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
     setKeywords([]); setApprovedKeywords([])
     try {
-      const res = await withTimeout(30000, fetch(`${API_BASE}/keywords`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, audience })
-      }))
+    const res = await fetch(`${API_BASE}/keywords`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+    content: originalText,
+    audience: audience  // <- this is what sends it to the backend
+  })
+
       if (!res.ok) {
         const txt = await res.text().catch(()=> '')
         throw new Error(`Keywords request failed: ${res.status} ${txt}`)
