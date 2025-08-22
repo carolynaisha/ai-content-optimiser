@@ -163,37 +163,7 @@ openai==0.28.1
 python-dotenv
 gunicorn
 
-# frontend/package.json
-{
-  "name": "frontend",
-  "private": true,
-  "version": "0.0.1",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview"
-  },
-  "dependencies": {
-    "dompurify": "^3.0.6",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.2.0",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.44",
-    "tailwindcss": "^3.4.10",
-    "vite": "^5.3.0"
-  }
-}
 
 # frontend/postcss.config.js
-export default {
-  plugins: {
-    tailwindcss: {},
-    autoprefixer: {}
-  }
-}
 
 
