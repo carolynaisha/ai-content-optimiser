@@ -3,7 +3,6 @@ flask-cors
 openai==0.28.1
 python-dotenv
 gunicorn
-pytrends
 
 
 
