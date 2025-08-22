@@ -34,10 +34,12 @@ def health():
     return {"status": "ok", "model": OPENAI_MODEL}
 
 @app.post("/keywords")
+@app.post("/keywords")
 def generate_keywords():
     data = request.get_json(force=True)
     content = (data.get("content") or "").strip()
-    audience = (data.get("audience") or "general").lower()  # added audience handling
+    audience = (data.get("audience") or "general").lower()
+
     if not content:
         return jsonify({"error": "Content is required"}), 400
 
@@ -55,18 +57,6 @@ Output one phrase per line. Use multi-word phrases where possible.
 Text:
 \"\"\"{content}\"\"\"
 """
-    data = request.get_json(force=True)
-    content = (data.get("content") or "").strip()
-    if not content:
-        return jsonify({"error": "Content is required"}), 400
-
-prompt = f"""
-Extract 10 high-quality keyword phrases {audience_hint} from the following content.
-Output one phrase per line. Use multi-word phrases where possible.
-
-Text:
-\"\"\"{content}\"\"\"
-"""
 
     try:
         response = openai.ChatCompletion.create(
@@ -78,7 +68,7 @@ Text:
             temperature=0.3,
         )
         lines = response.choices[0].message.content.splitlines()
-        keywords = [line.strip(" -•	") for line in lines if line.strip()]
+        keywords = [line.strip(" -•\t") for line in lines if line.strip()]
         return jsonify({"keywords": keywords})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
