@@ -231,13 +231,3 @@ import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(<App />)
 
-# frontend/src/index.css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-html, body, #root {
-  height: 100%;
-}
-
-
