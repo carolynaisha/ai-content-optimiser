@@ -66,7 +66,6 @@ Output one phrase per line. Use multi-word phrases where possible.
 
 Text:
 """{content}"""
-"""
     try:
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
