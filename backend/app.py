@@ -156,14 +156,8 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=True)
 
-# backend/requirements.txt
-flask
-flask-cors
-openai==0.28.1
-python-dotenv
-gunicorn
 
 
-# frontend/postcss.config.js
+
 
 
