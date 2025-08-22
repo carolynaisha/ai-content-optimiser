@@ -35,7 +35,7 @@ export default function App() {
       const res = await withTimeout(30000, fetch(`${API_BASE}/keywords`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText })
+        body: JSON.stringify({ content: originalText, audience })
       }))
       if (!res.ok) {
         const txt = await res.text().catch(()=> '')
