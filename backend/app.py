@@ -101,23 +101,21 @@ Rules:
 Text:
 \"\"\"{content}\"\"\"
 """.strip()
-
+try:
     r = call_openai(
         messages=[
-            {"role": "system", "content": "You are an expert in SEO keyword discovery."},
+            {"role": "system", "content": "You are a professional web editor. Output HTML fragments only."},
             {"role": "user", "content": prompt},
         ],
-        temperature=0.3,
+        temperature=0.2,
     )
-    lines = (r.choices[0].message.content or "").splitlines()
-    raw = [ln.strip(" •-\t").strip() for ln in lines if ln.strip()]
-    seen, kws = set(), []
-    for k in raw:
-        low = k.lower()
-        if low not in seen:
-            seen.add(low)
-            kws.append(k)
-    return jsonify({"keywords": kws})
+except Exception as e:
+    return jsonify({"error": f"OpenAI call failed: {e.__class__.__name__}: {e}"}), 502
+
+html = (r.choices[0].message.content or "").strip()
+# ... (strip fences as above)
+return jsonify({"html": html})
+
 
 @app.post("/rewrite")
 def rewrite():
