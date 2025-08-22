@@ -53,7 +53,7 @@ Extract 10 high-quality keyword phrases {audience_hint} from the following conte
 Output one phrase per line. Use multi-word phrases where possible.
 
 Text:
-"""{content}"""
+\"\"\"{content}\"\"\"
 """
     data = request.get_json(force=True)
     content = (data.get("content") or "").strip()
