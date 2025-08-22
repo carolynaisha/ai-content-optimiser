@@ -4,6 +4,24 @@ from io import BytesIO
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
+
+# ... inside /rewrite, after html = (r.choices[0].message.content or "").strip()
+html = (r.choices[0].message.content or "").strip()
+
+# strip backtick fences if the model wrapped the HTML
+if html.startswith("```"):
+    # remove leading ``` or ```html and trailing ```
+    html = re.sub(r"^```[a-zA-Z]*\s*\n?", "", html)
+    html = re.sub(r"\n?```$", "", html)
+
+# safety: if the model returned markdown, do a minimal nudge
+if "<" not in html and "</" not in html:
+    # fall back to a very basic paragraph so user sees something
+    html = f"<p>{html}</p>"
+
+return jsonify({"html": html})
+
+
 # Load env for local dev
 try:
     from dotenv import load_dotenv
