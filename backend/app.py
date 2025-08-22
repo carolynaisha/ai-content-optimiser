@@ -2,6 +2,7 @@
 import os
 import re
 import time
+import math
 import logging
 from io import BytesIO
 from typing import List, Dict, Any
@@ -36,12 +37,10 @@ logging.basicConfig(level=logging.INFO)
 
 # ---------- Helpers ----------
 def clamp(text: str, max_chars: int = MAX_INPUT_CHARS) -> str:
-    """Clamp user input to avoid huge prompts / token blowups."""
     return (text or "")[:max_chars]
 
 
 def call_openai(messages, model=OPENAI_MODEL, temperature=0.2, max_retries=2):
-    """Centralized OpenAI call with timeout and simple retries."""
     last_err = None
     for attempt in range(max_retries + 1):
         try:
@@ -68,6 +67,15 @@ def audience_hint(audience: str) -> str:
     return m.get((audience or "general").lower(), m["general"])
 
 
+def safe_avg(v) -> float | None:
+    """Return a finite float or None."""
+    try:
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except Exception:
+        return None
+
+
 def compute_trends(keywords: List[str], geo: str = "GB", timeframe: str = "now 7-d") -> Dict[str, Dict[str, Any]]:
     """
     Returns a dict:
@@ -76,8 +84,8 @@ def compute_trends(keywords: List[str], geo: str = "GB", timeframe: str = "now 7
     out = {k: {"avg": None, "label": "⚠️ No data"} for k in keywords}
     try:
         pytrends = TrendReq(hl='en-US', tz=360)
-        # Google Trends supports up to 5 queries at once — do in chunks
         chunk: List[str] = []
+
         def run_chunk(terms: List[str]):
             if not terms:
                 return
@@ -85,9 +93,11 @@ def compute_trends(keywords: List[str], geo: str = "GB", timeframe: str = "now 7
             df = pytrends.interest_over_time()
             for t in terms:
                 if hasattr(df, "columns") and t in df.columns:
-                    avg = float(df[t].mean())
+                    avg = safe_avg(df[t].mean())
                     out[t]["avg"] = avg
-                    if avg >= 50:
+                    if avg is None:
+                        out[t]["label"] = "⚠️ No data"
+                    elif avg >= 50:
                         out[t]["label"] = "⬆️ Trending"
                     elif avg >= 20:
                         out[t]["label"] = "🟢 Stable"
@@ -101,13 +111,12 @@ def compute_trends(keywords: List[str], geo: str = "GB", timeframe: str = "now 7
                 chunk = []
         run_chunk(chunk)
     except Exception:
-        # Keep defaults '⚠️ No data' on any failure (rate limit / network etc.)
+        # keep defaults
         pass
     return out
 
 
 def strip_code_fences(s: str) -> str:
-    """Remove ``` or ```html fences from model output, if present."""
     s = s.strip()
     if s.startswith("```"):
         s = re.sub(r"^```[a-zA-Z]*\s*\n?", "", s)
@@ -185,7 +194,6 @@ Text:
     except Exception as e:
         return jsonify({"error": f"OpenAI call failed: {e}"}), 502
 
-    # Clean and de-duplicate
     lines = (r.choices[0].message.content or "").splitlines()
     raw = [ln.strip(" •-\t").strip() for ln in lines if ln.strip()]
     seen, kws = set(), []
@@ -195,8 +203,8 @@ Text:
             seen.add(low)
             kws.append(k)
 
-    # Trends scoring + ranking
     trends = compute_trends(kws, geo=geo, timeframe=timeframe)
+    # Order: known avgs desc, then unknowns
     known = [(t, trends[t]["avg"]) for t in kws if trends[t]["avg"] is not None]
     unknown = [t for t in kws if trends[t]["avg"] is None]
     known.sort(key=lambda x: x[1], reverse=True)
@@ -207,8 +215,8 @@ Text:
         info = trends[term]
         result.append({
             "term": term,
-            "avg": info["avg"],
-            "trend": info["label"],
+            "avg": info["avg"],                 # None or finite float
+            "trend": info["label"],             # string label
             "position": idx
         })
     return jsonify({"keywords": result, "geo": geo, "timeframe": timeframe})
@@ -257,7 +265,6 @@ Source content:
         return jsonify({"error": f"OpenAI call failed: {e}"}), 502
 
     html = strip_code_fences((r.choices[0].message.content or "").strip())
-    # If the model returned plain text, at least wrap it so the UI shows something
     if "<" not in html and "</" not in html:
         html = f"<p>{html}</p>"
 
@@ -268,7 +275,7 @@ Source content:
 def download():
     """
     Body: { "html": "<h1>...</h1>..." }
-    Returns: a full HTML page (Tailwind via CDN) so user sees browser‑rendered output.
+    Returns: a full HTML page (Tailwind via CDN) for realistic preview.
     """
     data = request.get_json(force=True) or {}
     html_fragment = (data.get("html") or "").strip()
@@ -306,5 +313,6 @@ def download():
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     app.run(host="0.0.0.0", port=port, debug=True)
+
 
 
