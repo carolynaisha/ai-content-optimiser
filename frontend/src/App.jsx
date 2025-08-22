@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
-// Promise timeout helper
+// Promise timeout helper so the UI never hangs forever
 const withTimeout = (ms, promise) =>
   new Promise((resolve, reject) => {
     const id = setTimeout(() => reject(new Error('Request timed out')), ms)
@@ -21,16 +21,25 @@ const escapeHtml = (s) =>
     .replaceAll('>', '&gt;')
 
 export default function App() {
+  // Inputs
   const [originalText, setOriginalText] = useState('')
+
+  // Keywords (kept minimal in rollback)
   const [keywords, setKeywords] = useState([])
   const [approvedKeywords, setApprovedKeywords] = useState([])
+
+  // Output
   const [html, setHtml] = useState('')
+
+  // UI state
   const [loadingKeywords, setLoadingKeywords] = useState(false)
   const [loadingRewrite, setLoadingRewrite] = useState(false)
   const [error, setError] = useState('')
 
+  // Sanitized HTML for preview
   const renderedPreview = html ? DOMPurify.sanitize(html) : ''
 
+  // Generate keywords
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
@@ -46,8 +55,10 @@ export default function App() {
         throw new Error(`Keywords request failed: ${res.status} ${txt}`)
       }
       const data = await res.json()
-      setKeywords(data.keywords || [])
-      setApprovedKeywords(data.keywords || [])
+      if (data.error) throw new Error(data.error)       // NEW: surface server error
+      const kws = data.keywords || []
+      setKeywords(kws)
+      setApprovedKeywords(kws)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -55,6 +66,7 @@ export default function App() {
     }
   }
 
+  // Rewrite to HTML
   const rewriteToHtml = async () => {
     setError('')
     setLoadingRewrite(true)
@@ -63,6 +75,7 @@ export default function App() {
       const res = await withTimeout(60000, fetch(`${API_BASE}/rewrite`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Allow rewrite even if approvedKeywords is empty
         body: JSON.stringify({ content: originalText, keywords: approvedKeywords })
       }))
       if (!res.ok) {
@@ -70,6 +83,7 @@ export default function App() {
         throw new Error(`Rewrite request failed: ${res.status} ${txt}`)
       }
       const data = await res.json()
+      if (data.error) throw new Error(data.error)       // NEW: surface server error
       setHtml(data.html || '')
     } catch (e) {
       setError(String(e.message || e))
@@ -78,6 +92,7 @@ export default function App() {
     }
   }
 
+  // Download full HTML page (server wraps fragment into a complete page)
   const downloadHtml = async () => {
     setError('')
     try {
@@ -162,7 +177,7 @@ export default function App() {
               <div className="mt-3">
                 <button
                   onClick={rewriteToHtml}
-                  disabled={loadingRewrite || approvedKeywords.length === 0}
+                  disabled={loadingRewrite}  // allow rewrite even if no keywords yet
                   className="px-4 py-2 rounded-md border border-gray-900 bg-black text-white disabled:opacity-60"
                 >
                   {loadingRewrite ? 'Rewriting…' : 'Rewrite to HTML'}
@@ -202,6 +217,13 @@ export default function App() {
                 Download HTML Page
               </button>
             </section>
+          )}
+
+          {/* If rewrite returned nothing but didn't error */}
+          {html === '' && !loadingRewrite && originalText.trim() && (
+            <div className="mt-4 text-sm text-gray-500">
+              No HTML returned yet. Try “Rewrite to HTML” again or shorten the input.
+            </div>
           )}
 
           {error && (
