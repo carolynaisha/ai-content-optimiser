@@ -19,11 +19,9 @@ app = Flask(__name__)
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 
-
 @app.before_request
 def start_timer():
     request._start_time = time.time()
-
 
 @app.after_request
 def log_request(response):
@@ -31,11 +29,9 @@ def log_request(response):
     logging.info(f"{request.method} {request.path} -> {response.status_code} in {duration}ms")
     return response
 
-
 @app.get("/health")
 def health():
     return {"status": "ok", "model": OPENAI_MODEL}
-
 
 @app.post("/keywords")
 def generate_keywords():
@@ -65,7 +61,6 @@ Text:
         return jsonify({"keywords": keywords})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 @app.post("/rewrite")
 def rewrite_content():
@@ -103,7 +98,6 @@ Content:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.post("/download")
 def download_html():
     data = request.get_json(force=True)
@@ -128,7 +122,6 @@ def download_html():
 
     buf = BytesIO(full_page.encode("utf-8"))
     return send_file(buf, mimetype="text/html", as_attachment=True, download_name="optimized.html")
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
