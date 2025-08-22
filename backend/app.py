@@ -108,7 +108,7 @@ Content:
             html = re.sub(r"^```[a-zA-Z]*\n?", "", html)
             html = re.sub(r"```$", "", html)
         if "<" not in html or "</" not in html:
-        html = f"<p>{html}</p>"
+            html = f"<p>{html}</p>"
     return jsonify({"html": html})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
