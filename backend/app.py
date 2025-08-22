@@ -10,8 +10,7 @@ import re
 
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("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
-")
+openai.api_key = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 app = Flask(__name__)
