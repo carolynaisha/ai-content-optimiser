@@ -1,3 +1,4 @@
+# frontend/src/App.jsx
 import React, { useState } from 'react'
 import DOMPurify from 'dompurify'
 
@@ -182,7 +183,6 @@ export default function App() {
                   </pre>
                 </div>
               </div>
-
               <button
                 onClick={downloadHtml}
                 className="mt-5 px-4 py-2 rounded-md border border-gray-900 bg-black text-white"
@@ -206,4 +206,3 @@ export default function App() {
     </div>
   )
 }
-
