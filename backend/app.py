@@ -83,7 +83,6 @@ def rewrite_content():
 
     primary = ", ".join(keywords[:5]) if keywords else ""
     prompt = f"""
-
 Rewrite the content below using clean, semantic HTML tags only (no <html>, <head>, or <body>).
 Include a <h1> title, <h2>/<h3> subheadings, and <p> paragraphs.
 Begin with a 1–2 sentence introduction in a <p> tag.
@@ -105,13 +104,15 @@ Content:
         )
         html = response.choices[0].message.content.strip()
         if html.startswith("```"):
+            import re
             html = re.sub(r"^```[a-zA-Z]*\n?", "", html)
-            html = re.sub(r"```$", "", html)
-        if "<" not in html or "</" not in html:
+            html = re.sub(r"\n?```$", "", html)
+        if "<" not in html and "</" not in html:
             html = f"<p>{html}</p>"
-    return jsonify({"html": html})
+        return jsonify({"html": html})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.post("/download")
 def download_html():
