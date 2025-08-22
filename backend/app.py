@@ -1,315 +1,429 @@
 # backend/app.py
+
 import os
-import re
 import time
-import math
 import logging
 from io import BytesIO
-from typing import List, Dict, Any
-
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-
-# Optional .env for local dev (harmless on Render)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    pass
-
-# ---------- OpenAI ----------
+from dotenv import load_dotenv
 import openai
+import re
+
+# Load environment variables
+load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
-# ---------- Google Trends ----------
-from pytrends.request import TrendReq
-
-# ---------- Config ----------
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")            # fast + good
-OPENAI_REQUEST_TIMEOUT = int(os.getenv("OPENAI_REQUEST_TIMEOUT", "30"))
-MAX_INPUT_CHARS = int(os.getenv("MAX_INPUT_CHARS", "16000"))        # clamp very long pastes
-
-# ---------- App ----------
 app = Flask(__name__)
 CORS(app)
 logging.basicConfig(level=logging.INFO)
 
 
-# ---------- Helpers ----------
-def clamp(text: str, max_chars: int = MAX_INPUT_CHARS) -> str:
-    return (text or "")[:max_chars]
-
-
-def call_openai(messages, model=OPENAI_MODEL, temperature=0.2, max_retries=2):
-    last_err = None
-    for attempt in range(max_retries + 1):
-        try:
-            return openai.ChatCompletion.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                request_timeout=OPENAI_REQUEST_TIMEOUT,
-            )
-        except Exception as e:
-            last_err = e
-            time.sleep(0.8 * (attempt + 1))
-    raise last_err
-
-
-def audience_hint(audience: str) -> str:
-    m = {
-        "general": "for a general public audience",
-        "donor": "for donors, CSR leaders, and philanthropists",
-        "journalist": "for journalists and media editors",
-        "policy": "for policy makers and advocacy professionals",
-        "campaigner": "for grassroots campaigners and organisers; action‑driven",
-    }
-    return m.get((audience or "general").lower(), m["general"])
-
-
-def safe_avg(v) -> float | None:
-    """Return a finite float or None."""
-    try:
-        f = float(v)
-        return f if math.isfinite(f) else None
-    except Exception:
-        return None
-
-
-def compute_trends(keywords: List[str], geo: str = "GB", timeframe: str = "now 7-d") -> Dict[str, Dict[str, Any]]:
-    """
-    Returns a dict:
-      { term: { avg: float|None, label: '⬆️ Trending'|'🟢 Stable'|'🔻 Low interest'|'⚠️ No data' } }
-    """
-    out = {k: {"avg": None, "label": "⚠️ No data"} for k in keywords}
-    try:
-        pytrends = TrendReq(hl='en-US', tz=360)
-        chunk: List[str] = []
-
-        def run_chunk(terms: List[str]):
-            if not terms:
-                return
-            pytrends.build_payload(terms, timeframe=timeframe, geo=geo)
-            df = pytrends.interest_over_time()
-            for t in terms:
-                if hasattr(df, "columns") and t in df.columns:
-                    avg = safe_avg(df[t].mean())
-                    out[t]["avg"] = avg
-                    if avg is None:
-                        out[t]["label"] = "⚠️ No data"
-                    elif avg >= 50:
-                        out[t]["label"] = "⬆️ Trending"
-                    elif avg >= 20:
-                        out[t]["label"] = "🟢 Stable"
-                    else:
-                        out[t]["label"] = "🔻 Low interest"
-
-        for term in keywords:
-            chunk.append(term)
-            if len(chunk) == 5:
-                run_chunk(chunk)
-                chunk = []
-        run_chunk(chunk)
-    except Exception:
-        # keep defaults
-        pass
-    return out
-
-
-def strip_code_fences(s: str) -> str:
-    s = s.strip()
-    if s.startswith("```"):
-        s = re.sub(r"^```[a-zA-Z]*\s*\n?", "", s)
-        s = re.sub(r"\n?```$", "", s)
-    return s.strip()
-
-
 @app.before_request
-def _t0():
-    request._t0 = time.time()
+def start_timer():
+    request._start_time = time.time()
 
 
 @app.after_request
-def _log(resp):
-    try:
-        dur = int((time.time() - getattr(request, "_t0", time.time())) * 1000)
-        logging.info("%s %s -> %s in %dms", request.method, request.path, resp.status_code, dur)
-    except Exception:
-        pass
-    return resp
+def log_request(response):
+    duration = int((time.time() - request._start_time) * 1000)
+    logging.info(f"{request.method} {request.path} -> {response.status_code} in {duration}ms")
+    return response
 
 
-# ---------- Routes ----------
 @app.get("/health")
 def health():
     return {"status": "ok", "model": OPENAI_MODEL}
 
 
 @app.post("/keywords")
-def keywords():
-    """
-    Body: {
-      "content": "...",
-      "audience": "general|donor|journalist|policy|campaigner",
-      "geo": "GB",
-      "timeframe": "now 7-d"
-    }
-    Returns: {
-      "keywords": [ { "term": "...", "avg": 00.0|null, "trend": "🟢 Stable", "position": 1 } ],
-      "geo": "GB",
-      "timeframe": "now 7-d"
-    }
-    """
-    if not openai.api_key:
-        return jsonify({"error": "Missing OPENAI_API_KEY"}), 500
-
-    data = request.get_json(force=True) or {}
-    content = clamp((data.get("content") or "").strip())
-    audience = (data.get("audience") or "general").lower()
-    geo = (data.get("geo") or "GB").upper()
-    timeframe = data.get("timeframe") or "now 7-d"
-
+def generate_keywords():
+    data = request.get_json(force=True)
+    content = (data.get("content") or "").strip()
     if not content:
-        return jsonify({"error": "content is required"}), 400
+        return jsonify({"error": "Content is required"}), 400
 
     prompt = f"""
-Extract 12 concise, high‑quality keyword PHRASES {audience_hint(audience)} from the text below.
-Rules:
-- Output ONE phrase per line (no bullets/numbers).
-- Prefer specific multi‑word phrases over generic single words.
-- Include 3–5 phrases that would make good H2/H3 headings.
+Extract 10 high-quality keyword phrases from the following content.
+Output one phrase per line. Use multi-word phrases where possible.
 
 Text:
-\"\"\"{content}\"\"\"
-""".strip()
-
+"""{content}"""
+"""
     try:
-        r = call_openai(
+        response = openai.ChatCompletion.create(
+            model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are an expert SEO strategist."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": "You are an SEO keyword generator."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.3,
         )
+        lines = response.choices[0].message.content.splitlines()
+        keywords = [line.strip(" -•	") for line in lines if line.strip()]
+        return jsonify({"keywords": keywords})
     except Exception as e:
-        return jsonify({"error": f"OpenAI call failed: {e}"}), 502
-
-    lines = (r.choices[0].message.content or "").splitlines()
-    raw = [ln.strip(" •-\t").strip() for ln in lines if ln.strip()]
-    seen, kws = set(), []
-    for k in raw:
-        low = k.lower()
-        if low not in seen:
-            seen.add(low)
-            kws.append(k)
-
-    trends = compute_trends(kws, geo=geo, timeframe=timeframe)
-    # Order: known avgs desc, then unknowns
-    known = [(t, trends[t]["avg"]) for t in kws if trends[t]["avg"] is not None]
-    unknown = [t for t in kws if trends[t]["avg"] is None]
-    known.sort(key=lambda x: x[1], reverse=True)
-    ranked_terms = [t for t, _ in known] + unknown
-
-    result = []
-    for idx, term in enumerate(ranked_terms, start=1):
-        info = trends[term]
-        result.append({
-            "term": term,
-            "avg": info["avg"],                 # None or finite float
-            "trend": info["label"],             # string label
-            "position": idx
-        })
-    return jsonify({"keywords": result, "geo": geo, "timeframe": timeframe})
+        return jsonify({"error": str(e)}), 500
 
 
 @app.post("/rewrite")
-def rewrite():
-    """
-    Body: { "content":"...", "keywords":[ "term", ... ] }
-    Returns: { "html":"<h1>...</h1>..." }  # HTML fragment (no <html>/<body>)
-    """
-    if not openai.api_key:
-        return jsonify({"error": "Missing OPENAI_API_KEY"}), 500
-
-    data = request.get_json(force=True) or {}
-    content = clamp((data.get("content") or "").strip())
+def rewrite_content():
+    data = request.get_json(force=True)
+    content = (data.get("content") or "").strip()
     keywords = data.get("keywords", [])
-
     if not content:
-        return jsonify({"error": "content is required"}), 400
+        return jsonify({"error": "Content is required"}), 400
 
     primary = ", ".join(keywords[:5]) if keywords else ""
     prompt = f"""
-Rewrite the content into a CLEAN, SEMANTIC **HTML FRAGMENT** (no <html>, <head>, or <body>).
-Requirements:
-- Use proper tags: <h1> title once, <h2>/<h3> for sections, <p> for paragraphs, <ul>/<li> for bullets.
-- Start with a concise 1–2 sentence intro in a <p>.
-- Keep paragraphs short (2–4 sentences).
-- Naturally weave in approved keywords (no stuffing). Primary keywords: {primary}
-- Do NOT invent new facts. Use only the source content.
-- Return ONLY the HTML fragment.
+Rewrite the content below using clean, semantic HTML tags only (no <html>, <head>, or <body>).
+Include a <h1> title, <h2>/<h3> subheadings, and <p> paragraphs.
+Begin with a 1–2 sentence introduction in a <p> tag.
+Primary keywords to include: {primary}
+Only use the source content. Do not fabricate information.
 
-Source content:
-\"\"\"{content}\"\"\"
-""".strip()
-
+Content:
+"""{content}"""
+"""
     try:
-        r = call_openai(
+        response = openai.ChatCompletion.create(
+            model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": "You are a professional web editor. Output HTML fragments only."},
-                {"role": "user", "content": prompt},
+                {"role": "system", "content": "You convert text into HTML using clean, semantic markup only."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.2,
         )
+        html = response.choices[0].message.content.strip()
+        if html.startswith("```"):
+            html = re.sub(r"^```[a-zA-Z]*\n?", "", html)
+            html = re.sub(r"```$", "", html)
+        return jsonify({"html": html})
     except Exception as e:
-        return jsonify({"error": f"OpenAI call failed: {e}"}), 502
-
-    html = strip_code_fences((r.choices[0].message.content or "").strip())
-    if "<" not in html and "</" not in html:
-        html = f"<p>{html}</p>"
-
-    return jsonify({"html": html})
+        return jsonify({"error": str(e)}), 500
 
 
 @app.post("/download")
-def download():
-    """
-    Body: { "html": "<h1>...</h1>..." }
-    Returns: a full HTML page (Tailwind via CDN) for realistic preview.
-    """
-    data = request.get_json(force=True) or {}
+def download_html():
+    data = request.get_json(force=True)
     html_fragment = (data.get("html") or "").strip()
 
-    page = f"""<!DOCTYPE html>
-<html lang="en">
+    full_page = f"""<!DOCTYPE html>
+<html lang=\"en\">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Optimized Content Preview</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  .prose h1{{font-size:2rem;line-height:1.2;margin-bottom:.75rem}}
-  .prose h2{{font-size:1.4rem;margin-top:1rem;margin-bottom:.5rem}}
-  .prose h3{{font-size:1.15rem;margin-top:.75rem;margin-bottom:.4rem}}
-  .prose p{{margin:.5rem 0;line-height:1.6}}
-  .prose ul{{margin-left:1.25rem;margin-top:.4rem;margin-bottom:.4rem}}
-</style>
+  <meta charset=\"UTF-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+  <title>Optimized Content</title>
+  <script src=\"https://cdn.tailwindcss.com\"></script>
 </head>
-<body class="bg-gray-50 text-gray-900">
-  <div class="max-w-4xl mx-auto p-5">
-    <header class="text-sm text-gray-500 mb-2">Downloaded preview — full HTML page</header>
-    <article class="prose max-w-none bg-white border border-gray-200 rounded-xl p-6">
+<body class=\"bg-gray-50 text-gray-900\">
+  <div class=\"max-w-4xl mx-auto p-6\">
+    <article class=\"prose max-w-none bg-white border border-gray-200 rounded-xl p-6\">
       {html_fragment}
     </article>
   </div>
 </body>
 </html>"""
 
-    buf = BytesIO(page.encode("utf-8"))
+    buf = BytesIO(full_page.encode("utf-8"))
     return send_file(buf, mimetype="text/html", as_attachment=True, download_name="optimized.html")
 
 
-# ---------- Entrypoint ----------
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
+    port = int(os.getenv("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=True)
+
+# backend/requirements.txt
+flask
+flask-cors
+openai==0.28.1
+python-dotenv
+gunicorn
+
+# frontend/package.json
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "dompurify": "^3.0.6",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.44",
+    "tailwindcss": "^3.4.10",
+    "vite": "^5.3.0"
+  }
+}
+
+# frontend/postcss.config.js
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {}
+  }
+}
+
+# frontend/tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,jsx,ts,tsx}"
+  ],
+  theme: {
+    extend: {}
+  },
+  plugins: []
+}
+
+# frontend/index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Content Optimizer</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.jsx"></script>
+  </body>
+</html>
+
+# frontend/src/main.jsx
+import './index.css'
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import App from './App.jsx'
+
+createRoot(document.getElementById('root')).render(<App />)
+
+# frontend/src/index.css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+# frontend/src/App.jsx
+import React, { useState } from 'react'
+import DOMPurify from 'dompurify'
+
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+
+const withTimeout = (ms, promise) =>
+  new Promise((resolve, reject) => {
+    const id = setTimeout(() => reject(new Error('Request timed out')), ms)
+    promise.then(
+      (res) => { clearTimeout(id); resolve(res) },
+      (err) => { clearTimeout(id); reject(err) }
+    )
+  })
+
+const escapeHtml = (s) =>
+  (s || '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;')
+
+export default function App() {
+  const [originalText, setOriginalText] = useState('')
+  const [keywords, setKeywords] = useState([])
+  const [approvedKeywords, setApprovedKeywords] = useState([])
+  const [html, setHtml] = useState('')
+  const [loadingKeywords, setLoadingKeywords] = useState(false)
+  const [loadingRewrite, setLoadingRewrite] = useState(false)
+  const [error, setError] = useState('')
+
+  const renderedPreview = html ? DOMPurify.sanitize(html) : ''
+
+  const genKeywords = async () => {
+    setError('')
+    setLoadingKeywords(true)
+    setKeywords([]); setApprovedKeywords([])
+    try {
+      const res = await withTimeout(30000, fetch(`${API_BASE}/keywords`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: originalText })
+      }))
+      if (!res.ok) {
+        const txt = await res.text().catch(()=> '')
+        throw new Error(`Keywords request failed: ${res.status} ${txt}`)
+      }
+      const data = await res.json()
+      setKeywords(data.keywords || [])
+      setApprovedKeywords(data.keywords || [])
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setLoadingKeywords(false)
+    }
+  }
+
+  const rewriteToHtml = async () => {
+    setError('')
+    setLoadingRewrite(true)
+    setHtml('')
+    try {
+      const res = await withTimeout(60000, fetch(`${API_BASE}/rewrite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: originalText, keywords: approvedKeywords })
+      }))
+      if (!res.ok) {
+        const txt = await res.text().catch(()=> '')
+        throw new Error(`Rewrite request failed: ${res.status} ${txt}`)
+      }
+      const data = await res.json()
+      setHtml(data.html || '')
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setLoadingRewrite(false)
+    }
+  }
+
+  const downloadHtml = async () => {
+    setError('')
+    try {
+      const res = await fetch(`${API_BASE}/download`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html })
+      })
+      if (!res.ok) {
+        const txt = await res.text().catch(()=> '')
+        throw new Error(`Download request failed: ${res.status} ${txt}`)
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'optimized.html'
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 py-10">
+      <div className="max-w-4xl mx-auto px-4">
+        <div className="bg-white border shadow-sm rounded-2xl p-6 md:p-8">
+          <header className="mb-8 text-center">
+            <h1 className="text-3xl font-semibold tracking-tight">AI Content Optimizer</h1>
+            <p className="text-sm text-gray-600 mt-2">
+              Paste → Generate Keywords → Rewrite to HTML → View Preview & HTML Source → Download page
+            </p>
+          </header>
+
+          <section>
+            <h2 className="text-xl font-semibold mb-3">Step 1 — Paste Original Content</h2>
+            <textarea
+              rows={12}
+              className="w-full h-64 md:h-80 border border-gray-300 rounded-lg p-4 text-[15px] focus:outline-none focus:ring-2 focus:ring-black/40"
+              placeholder="Paste your original content here…"
+              value={originalText}
+              onChange={(e) => setOriginalText(e.target.value)}
+            />
+
+            <div className="mt-4">
+              <button
+                onClick={genKeywords}
+                disabled={!originalText.trim() || loadingKeywords}
+                className="px-4 py-2 rounded-md border border-gray-900 bg-black text-white disabled:opacity-60"
+              >
+                {loadingKeywords ? 'Generating…' : 'Generate Keywords'}
+              </button>
+            </div>
+          </section>
+
+          {keywords.length > 0 && (
+            <section className="mt-8">
+              <h2 className="text-xl font-semibold mb-3">Step 2 — Approve or Edit Keywords</h2>
+              <ul className="list-disc pl-5">
+                {keywords.map((kw, i) => (
+                  <li key={i} className="my-1">{kw}</li>
+                ))}
+              </ul>
+
+              <div className="mt-3">
+                <label className="block text-sm mb-1">Approved keywords (comma-separated):</label>
+                <textarea
+                  rows={3}
+                  className="w-full border border-gray-300 rounded-md p-3 focus:outline-none focus:ring-2 focus:ring-black/40"
+                  value={approvedKeywords.join(', ')}
+                  onChange={(e) =>
+                    setApprovedKeywords(
+                      e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
+                    )
+                  }
+                />
+              </div>
+
+              <div className="mt-3">
+                <button
+                  onClick={rewriteToHtml}
+                  disabled={loadingRewrite}
+                  className="px-4 py-2 rounded-md border border-gray-900 bg-black text-white disabled:opacity-60"
+                >
+                  {loadingRewrite ? 'Rewriting…' : 'Rewrite to HTML'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {html && (
+            <section className="mt-8">
+              <h2 className="text-xl font-semibold mb-3">Step 3 — Output</h2>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-semibold mb-2">Rendered Preview</h3>
+                  <div
+                    className="prose max-w-none border border-gray-200 rounded-lg p-4"
+                    dangerouslySetInnerHTML={{ __html: renderedPreview || '<p>(No content)</p>' }}
+                  />
+                </div>
+                <div>
+                  <h3 className="font-semibold mb-2">HTML Source</h3>
+                  <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto">
+                    {escapeHtml(html)}
+                  </pre>
+                </div>
+              </div>
+              <button
+                onClick={downloadHtml}
+                className="mt-5 px-4 py-2 rounded-md border border-gray-900 bg-black text-white"
+              >
+                Download HTML Page
+              </button>
+            </section>
+          )}
+
+          {error && (
+            <div className="mt-4 text-red-700">
+              <strong>Error:</strong> {error}
+            </div>
+          )}
+
+          <footer className="mt-10 text-xs text-gray-500 text-center">
+            Ensure <code>VITE_API_BASE</code> in Vercel points to your Render backend (https).
+          </footer>
+        </div>
+      </div>
+    </div>
+  )
+}
+
