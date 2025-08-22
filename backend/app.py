@@ -83,6 +83,7 @@ def rewrite_content():
 
     primary = ", ".join(keywords[:5]) if keywords else ""
     prompt = f"""
+
 Rewrite the content below using clean, semantic HTML tags only (no <html>, <head>, or <body>).
 Include a <h1> title, <h2>/<h3> subheadings, and <p> paragraphs.
 Begin with a 1–2 sentence introduction in a <p> tag.
@@ -90,8 +91,9 @@ Primary keywords to include: {primary}
 Only use the source content. Do not fabricate information.
 
 Content:
-"""{content}"""
+\"\"\"{content}\"\"\"
 """
+
     try:
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
