@@ -1,3 +1,14 @@
+# Node dependencies
 node_modules
+
+# Build output
 dist
+
+# Local env files
 .env
+.env.local
+.env.*.local
+
+# System files
+.DS_Store
+
