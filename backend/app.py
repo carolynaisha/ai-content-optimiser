@@ -60,12 +60,14 @@ Text:
     if not content:
         return jsonify({"error": "Content is required"}), 400
 
-    prompt = f"""
-Extract 10 high-quality keyword phrases from the following content.
+prompt = f"""
+Extract 10 high-quality keyword phrases {audience_hint} from the following content.
 Output one phrase per line. Use multi-word phrases where possible.
 
 Text:
-"""{content}"""
+\"\"\"{content}\"\"\"
+"""
+
     try:
         response = openai.ChatCompletion.create(
             model=OPENAI_MODEL,
