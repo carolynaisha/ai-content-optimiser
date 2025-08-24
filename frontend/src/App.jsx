@@ -1,13 +1,13 @@
-
+// src/App.jsx
 import React, { useState } from 'react'
 import DOMPurify from 'dompurify'
 
-// ✅ shared helpers
+// Shared helpers
 import { apiFetch, postRewrite } from '@/lib/api'
 import { withRetry } from '@/lib/retry'
-import { RewriteSchema } from '@/lib/schemas'
+import { KeywordsSchema, RewriteSchema } from '@/lib/schemas'
 
-// ✅ output component (copy + download)
+// Output component (download + copy)
 import { RewriteOutput } from '@/features/rewrite/Output'
 
 const escapeHtml = (s) =>
@@ -27,7 +27,7 @@ export default function App() {
     ? DOMPurify.sanitize(rewriteResult.html_block)
     : ''
 
-  // --- Step 1: generate keywords (kept simple; no schema needed here) ---
+  // Step 1 — Generate keywords (validated via Zod)
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
@@ -35,12 +35,12 @@ export default function App() {
     try {
       const json = await apiFetch('/keywords', {
         method: 'POST',
-        body: JSON.stringify({ content: originalText, audience })
+        body: JSON.stringify({ content: originalText, audience }),
       }, 30000)
 
-      const list = json.keywords || []
-      setKeywords(list)
-      setApprovedKeywords(list)
+      const { keywords } = KeywordsSchema.parse(json)
+      setKeywords(keywords)
+      setApprovedKeywords(keywords)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -48,22 +48,19 @@ export default function App() {
     }
   }
 
-  // --- Step 2: rewrite to semantic HTML (validate shape with Zod) ---
+  // Step 2 — Rewrite to semantic HTML (retry + validate via Zod)
   const rewriteToHtml = async () => {
     setError('')
     setLoadingRewrite(true)
     setRewriteResult(null)
     try {
-      // call your helper with retry (handles timeouts/transient errors)
       const json = await withRetry(
         () => postRewrite({ content: originalText, keywords: approvedKeywords, audience }),
         2 // attempts
       )
 
-      // ✅ validate the response structure before using it
-      const { data } = RewriteSchema.parse(json)
-
-      setRewriteResult(data) // guaranteed { html_block, download_path }
+      const { data } = RewriteSchema.parse(json) // { html_block, download_path }
+      setRewriteResult(data)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -71,7 +68,6 @@ export default function App() {
     }
   }
 
-  // legacy source view (pretty print the article block)
   const htmlSource = rewriteResult?.html_block || ''
 
   return (
@@ -85,6 +81,7 @@ export default function App() {
             </p>
           </header>
 
+          {/* Step 1 — Input */}
           <section>
             <h2 className="text-xl font-semibold mb-3">Step 1 — Paste Original Content</h2>
             <textarea
@@ -117,6 +114,7 @@ export default function App() {
             </div>
           </section>
 
+          {/* Step 2 — Approve/Edit Keywords */}
           {keywords.length > 0 && (
             <section className="mt-8">
               <h2 className="text-xl font-semibold mb-3">Step 2 — Approve or Edit Keywords</h2>
@@ -152,14 +150,15 @@ export default function App() {
             </section>
           )}
 
+          {/* Step 3 — Output */}
           {rewriteResult && (
             <section className="mt-8">
               <h2 className="text-xl font-semibold mb-3">Step 3 — Output</h2>
 
-              {/* Preview + Download/Copy via component */}
+              {/* Download + Copy + Preview */}
               <RewriteOutput result={rewriteResult} />
 
-              {/* Optional: show raw HTML source (sanitised for display) */}
+              {/* Optional raw HTML (sanitised display) */}
               <div className="mt-6">
                 <h3 className="font-semibold mb-2">HTML Source</h3>
                 <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto">
@@ -167,7 +166,7 @@ export default function App() {
                 </pre>
               </div>
 
-              {/* Also keep a rendered preview on-page (sanitised) */}
+              {/* Rendered preview */}
               <div className="mt-6">
                 <h3 className="font-semibold mb-2">Rendered Preview</h3>
                 <div
@@ -178,6 +177,7 @@ export default function App() {
             </section>
           )}
 
+          {/* Errors */}
           {error && (
             <div className="mt-4 text-red-700">
               <strong>Error:</strong> {error}
