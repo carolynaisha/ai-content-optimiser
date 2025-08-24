@@ -1,16 +1,13 @@
+
 import React, { useState } from 'react'
 import DOMPurify from 'dompurify'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// ✅ shared helpers
+import { apiFetch, postRewrite } from '@/lib/api'
+import { withRetry } from '@/lib/retry'
 
-const withTimeout = (ms, promise) =>
-  new Promise((resolve, reject) => {
-    const id = setTimeout(() => reject(new Error('Request timed out')), ms)
-    promise.then(
-      (res) => { clearTimeout(id); resolve(res) },
-      (err) => { clearTimeout(id); reject(err) }
-    )
-  })
+// ✅ output component that shows copy + download
+import { RewriteOutput } from '@/features/rewrite/Output'
 
 const escapeHtml = (s) =>
   (s || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -20,30 +17,28 @@ export default function App() {
   const [audience, setAudience] = useState('general')
   const [keywords, setKeywords] = useState([])
   const [approvedKeywords, setApprovedKeywords] = useState([])
-  const [html, setHtml] = useState('')
+  const [rewriteResult, setRewriteResult] = useState(null) // { html_block, download_path }
   const [loadingKeywords, setLoadingKeywords] = useState(false)
   const [loadingRewrite, setLoadingRewrite] = useState(false)
   const [error, setError] = useState('')
 
-  const renderedPreview = html ? DOMPurify.sanitize(html) : ''
+  const renderedPreview = rewriteResult?.html_block
+    ? DOMPurify.sanitize(rewriteResult.html_block)
+    : ''
 
+  // --- Step 1: generate keywords ---
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
     setKeywords([]); setApprovedKeywords([])
     try {
-      const res = await withTimeout(30000, fetch(`${API_BASE}/keywords`, {
+      const data = await apiFetch('/keywords', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: originalText, audience })
-      }))
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '')
-        throw new Error(`Keywords request failed: ${res.status} ${txt}`)
-      }
-      const data = await res.json()
-      setKeywords(data.keywords || [])
-      setApprovedKeywords(data.keywords || [])
+      }, 30000)
+      const list = data.keywords || []
+      setKeywords(list)
+      setApprovedKeywords(list)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -51,22 +46,18 @@ export default function App() {
     }
   }
 
+  // --- Step 2: rewrite to semantic HTML (returns html_block + download_path) ---
   const rewriteToHtml = async () => {
     setError('')
     setLoadingRewrite(true)
-    setHtml('')
+    setRewriteResult(null)
     try {
-      const res = await withTimeout(60000, fetch(`${API_BASE}/rewrite`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: originalText, keywords: approvedKeywords })
-      }))
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '')
-        throw new Error(`Rewrite request failed: ${res.status} ${txt}`)
-      }
-      const data = await res.json()
-      setHtml(data.html || '')
+      const resp = await withRetry(
+        () => postRewrite({ content: originalText, keywords: approvedKeywords, audience }),
+        2 // retry attempts
+      )
+      // backend returns { data: { html_block, download_path } }
+      setRewriteResult(resp.data)
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -74,29 +65,8 @@ export default function App() {
     }
   }
 
-  const downloadHtml = async () => {
-    setError('')
-    try {
-      const res = await fetch(`${API_BASE}/download`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ html })
-      })
-      if (!res.ok) {
-        const txt = await res.text().catch(() => '')
-        throw new Error(`Download request failed: ${res.status} ${txt}`)
-      }
-      const blob = await res.blob()
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'optimized.html'
-      a.click()
-      window.URL.revokeObjectURL(url)
-    } catch (e) {
-      setError(String(e.message || e))
-    }
-  }
+  // legacy source view (pretty print the article block)
+  const htmlSource = rewriteResult?.html_block || ''
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">
@@ -176,30 +146,29 @@ export default function App() {
             </section>
           )}
 
-          {html && (
+          {rewriteResult && (
             <section className="mt-8">
               <h2 className="text-xl font-semibold mb-3">Step 3 — Output</h2>
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-semibold mb-2">Rendered Preview</h3>
-                  <div
-                    className="prose max-w-none border border-gray-200 rounded-lg p-4"
-                    dangerouslySetInnerHTML={{ __html: renderedPreview || '<p>(No content)</p>' }}
-                  />
-                </div>
-                <div>
-                  <h3 className="font-semibold mb-2">HTML Source</h3>
-                  <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto">
-                    {escapeHtml(html)}
-                  </pre>
-                </div>
+
+              {/* Preview + Download/Copy via component */}
+              <RewriteOutput result={rewriteResult} />
+
+              {/* Optional: show raw HTML source (sanitised for display) */}
+              <div className="mt-6">
+                <h3 className="font-semibold mb-2">HTML Source</h3>
+                <pre className="text-xs bg-gray-50 border rounded p-3 overflow-auto">
+                  {escapeHtml(htmlSource)}
+                </pre>
               </div>
-              <button
-                onClick={downloadHtml}
-                className="mt-5 px-4 py-2 rounded-md border border-gray-900 bg-black text-white"
-              >
-                Download HTML Page
-              </button>
+
+              {/* Also keep a rendered preview on-page (sanitised) */}
+              <div className="mt-6">
+                <h3 className="font-semibold mb-2">Rendered Preview</h3>
+                <div
+                  className="prose max-w-none border border-gray-200 rounded-lg p-4"
+                  dangerouslySetInnerHTML={{ __html: renderedPreview || '<p>(No content)</p>' }}
+                />
+              </div>
             </section>
           )}
 
@@ -210,10 +179,11 @@ export default function App() {
           )}
 
           <footer className="mt-10 text-xs text-gray-500 text-center">
-            Ensure <code>VITE_API_BASE</code> in Vercel points to your Render backend (https).
+            Ensure <code>VITE_API_BASE_URL</code> in Vercel points to your backend (or proxy <code>/api</code>).
           </footer>
         </div>
       </div>
     </div>
   )
 }
+
