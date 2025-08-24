@@ -5,8 +5,9 @@ import DOMPurify from 'dompurify'
 // ✅ shared helpers
 import { apiFetch, postRewrite } from '@/lib/api'
 import { withRetry } from '@/lib/retry'
+import { RewriteSchema } from '@/lib/schemas'
 
-// ✅ output component that shows copy + download
+// ✅ output component (copy + download)
 import { RewriteOutput } from '@/features/rewrite/Output'
 
 const escapeHtml = (s) =>
@@ -26,17 +27,18 @@ export default function App() {
     ? DOMPurify.sanitize(rewriteResult.html_block)
     : ''
 
-  // --- Step 1: generate keywords ---
+  // --- Step 1: generate keywords (kept simple; no schema needed here) ---
   const genKeywords = async () => {
     setError('')
     setLoadingKeywords(true)
     setKeywords([]); setApprovedKeywords([])
     try {
-      const data = await apiFetch('/keywords', {
+      const json = await apiFetch('/keywords', {
         method: 'POST',
         body: JSON.stringify({ content: originalText, audience })
       }, 30000)
-      const list = data.keywords || []
+
+      const list = json.keywords || []
       setKeywords(list)
       setApprovedKeywords(list)
     } catch (e) {
@@ -46,18 +48,22 @@ export default function App() {
     }
   }
 
-  // --- Step 2: rewrite to semantic HTML (returns html_block + download_path) ---
+  // --- Step 2: rewrite to semantic HTML (validate shape with Zod) ---
   const rewriteToHtml = async () => {
     setError('')
     setLoadingRewrite(true)
     setRewriteResult(null)
     try {
-      const resp = await withRetry(
+      // call your helper with retry (handles timeouts/transient errors)
+      const json = await withRetry(
         () => postRewrite({ content: originalText, keywords: approvedKeywords, audience }),
-        2 // retry attempts
+        2 // attempts
       )
-      // backend returns { data: { html_block, download_path } }
-      setRewriteResult(resp.data)
+
+      // ✅ validate the response structure before using it
+      const { data } = RewriteSchema.parse(json)
+
+      setRewriteResult(data) // guaranteed { html_block, download_path }
     } catch (e) {
       setError(String(e.message || e))
     } finally {
@@ -179,11 +185,10 @@ export default function App() {
           )}
 
           <footer className="mt-10 text-xs text-gray-500 text-center">
-            Ensure <code>VITE_API_BASE_URL</code> in Vercel points to your backend (or proxy <code>/api</code>).
+            Ensure <code>VITE_API_BASE_URL</code> (or a proxy for <code>/api</code>) is set in Vercel.
           </footer>
         </div>
       </div>
     </div>
   )
 }
-
