@@ -5,7 +5,7 @@ const API_BASE =
   process.env.VITE_API_BASE_URL ||
   "/api";
 
-// unified fetch wrapper
+// unified fetch wrapper with timeout + error handling
 export async function apiFetch(path, options = {}, timeoutMs = 20000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -31,9 +31,10 @@ export async function apiFetch(path, options = {}, timeoutMs = 20000) {
   }
 }
 
-// Specific API helpers
+// ✅ All your backend endpoints collected here
 export const getTrends   = (p) => apiFetch("/keyword-trends", { method:"POST", body: JSON.stringify(p) });
 export const getMetadata = (p) => apiFetch("/metadata",       { method:"POST", body: JSON.stringify(p) });
 export const getSchema   = (p) => apiFetch("/schema",         { method:"POST", body: JSON.stringify(p) });
 export const getSocial   = (p) => apiFetch("/social",         { method:"POST", body: JSON.stringify(p) });
 export const postRewrite = (p) => apiFetch("/rewrite",        { method:"POST", body: JSON.stringify(p) });
+
